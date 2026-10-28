@@ -228,3 +228,93 @@ def test_delete_product_not_found(client):
     assert response.status_code == 404
     assert response.json()["detail"] == "Product not found"
 
+
+
+def test_add_inventory(client):
+    # Create a product with 10 units in stock
+    product_data = {
+        "name": "Gaming Keyboard",
+        "description": "Mechanical gaming keyboard",
+        "price": "89.99",
+        "stock_quantity": 10,
+    }
+
+    create_response = client.post("/products", json=product_data)
+    assert create_response.status_code == 201
+
+    product_id = create_response.json()["id"]
+
+    # Add 5 units to inventory
+    response = client.patch(
+        f"/products/{product_id}/inventory",
+        json={"quantity_change": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stock_quantity"] == 15
+
+    # Verify the updated quantity was saved
+    get_response = client.get(f"/products/{product_id}")
+
+    assert get_response.status_code == 200
+    assert get_response.json()["stock_quantity"] == 15
+
+
+
+def test_remove_inventory(client):
+    # Create a product with 20 units
+    product_data = {
+        "name": "Gaming Mouse",
+        "description": "Wireless gaming mouse",
+        "price": "49.99",
+        "stock_quantity": 20,
+    }
+
+    create_response = client.post("/products", json=product_data)
+    assert create_response.status_code == 201
+
+    product_id = create_response.json()["id"]
+
+    # Remove 5 units
+    response = client.patch(
+        f"/products/{product_id}/inventory",
+        json={"quantity_change": -5},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["stock_quantity"] == 15
+
+    # Verify the database saved the new quantity
+    get_response = client.get(f"/products/{product_id}")
+
+    assert get_response.status_code == 200
+    assert get_response.json()["stock_quantity"] == 15
+
+
+def test_remove_inventory_insufficient_stock(client):
+    # Create a product with 10 units available
+    product_data = {
+        "name": "Gaming Keyboard",
+        "description": "Mechanical gaming keyboard",
+        "price": "79.99",
+        "stock_quantity": 10,
+    }
+
+    create_response = client.post("/products", json=product_data)
+    assert create_response.status_code == 201
+
+    product_id = create_response.json()["id"]
+
+    # Attempt to remove more units than available
+    response = client.patch(
+        f"/products/{product_id}/inventory",
+        json={"quantity_change": -15},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Insufficient stock"
+
+    # Inventory should remain unchanged
+    get_response = client.get(f"/products/{product_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["stock_quantity"] == 10

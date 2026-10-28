@@ -17,6 +17,8 @@ class ProductUpdate(BaseModel):
     price: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
     stock_quantity: int = Field(ge=0)
 
+class InventoryAdjustment(BaseModel):
+    quantity_change: int
 
 class ProductResponse(ProductCreate):
     id: int

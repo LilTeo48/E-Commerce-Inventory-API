@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Product
-from app.schemas import ProductCreate, ProductResponse, ProductUpdate
+from app.schemas import (
+    InventoryAdjustment,
+    ProductCreate,
+    ProductResponse,
+    ProductUpdate,
+)
 
 
 # Initialize the FastAPI application
@@ -121,3 +126,36 @@ def delete_product(
     db.delete(product)
     db.commit()
 
+
+# Adjust inventory for an existing product
+@app.patch(
+    "/products/{product_id}/inventory",
+    response_model=ProductResponse,
+)
+def adjust_inventory(
+    product_id: int,
+    adjustment: InventoryAdjustment,
+    db: Session = Depends(get_db),
+):
+    product = db.get(Product, product_id)
+
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    new_quantity = product.stock_quantity + adjustment.quantity_change
+
+    if new_quantity < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Insufficient stock",
+        )
+
+    product.stock_quantity = new_quantity
+
+    db.commit()
+    db.refresh(product)
+
+    return product
