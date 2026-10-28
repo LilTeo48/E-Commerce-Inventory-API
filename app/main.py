@@ -12,6 +12,11 @@ from app.schemas import (
     ProductUpdate,
 )
 
+from decimal import Decimal
+
+from app.order_models import Order, OrderItem
+from app.schemas import OrderCreate, OrderResponse
+
 
 # Initialize the FastAPI application
 app = FastAPI(
@@ -159,3 +164,106 @@ def adjust_inventory(
     db.refresh(product)
 
     return product
+
+# Create a new customer order
+@app.post(
+    "/orders",
+    response_model=OrderResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+
+
+def create_order(
+    order_data: OrderCreate,
+    db: Session = Depends(get_db),
+):
+    # Collect unique product IDs in a consistent order
+    product_ids = sorted({
+        item.product_id for item in order_data.items
+    })
+
+    # Retrieve and lock the requested products
+    products = db.scalars(
+        select(Product)
+        .where(Product.id.in_(product_ids))
+        .order_by(Product.id)
+        .with_for_update()
+    ).all()
+
+    # Build a dictionary for quick product lookup
+    products_by_id = {
+        product.id: product for product in products
+    }
+
+    # Verify that every requested product exists
+    for item in order_data.items:
+        if item.product_id not in products_by_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product {item.product_id} not found",
+            )
+
+    # Combine quantities when the same product appears more than once
+    requested_quantities = {}
+
+    for item in order_data.items:
+        requested_quantities[item.product_id] = (
+            requested_quantities.get(item.product_id, 0)
+            + item.quantity
+        )
+
+    # Verify sufficient inventory exists for every product
+    for product_id, quantity in requested_quantities.items():
+        product = products_by_id[product_id]
+
+        if product.stock_quantity < quantity:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient stock for product {product_id}",
+            )
+
+    # Calculate the order total using database prices
+    total_amount = Decimal("0.00")
+
+    for product_id, quantity in requested_quantities.items():
+        product = products_by_id[product_id]
+        total_amount += product.price * quantity
+
+
+    # Create a new order
+    new_order = Order(
+        status="pending",
+        total_amount=total_amount,
+    )
+
+    # Create order items using the current product prices
+    for product_id, quantity in requested_quantities.items():
+        product = products_by_id[product_id]
+
+        order_item = OrderItem(
+            product_id=product_id,
+            quantity=quantity,
+            unit_price=product.price,
+        )
+
+        new_order.items.append(order_item)
+
+    # Stage the order and its items for database insertion
+    db.add(new_order)
+
+
+
+    # Deduct purchased quantities from inventory
+    for product_id, quantity in requested_quantities.items():
+        product = products_by_id[product_id]
+        product.stock_quantity -= quantity
+
+    # Save the order, order items, and inventory changes together
+    db.commit()
+
+    # Reload the saved order
+    db.refresh(new_order)
+
+    return new_order
+
+
