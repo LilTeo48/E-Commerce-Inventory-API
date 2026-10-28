@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Product
-from app.schemas import ProductCreate, ProductResponse
+from app.schemas import ProductCreate, ProductResponse, ProductUpdate
 
 
 # Initialize the FastAPI application
@@ -75,3 +75,49 @@ def get_product(
         )
 
     return product
+
+
+# Update an existing product
+@app.put("/products/{product_id}", response_model=ProductResponse)
+def update_product(
+    product_id: int,
+    product_data: ProductUpdate,
+    db: Session = Depends(get_db),
+):
+    product = db.get(Product, product_id)
+
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    for field, value in product_data.model_dump().items():
+        setattr(product, field, value)
+
+    db.commit()
+    db.refresh(product)
+
+    return product
+
+
+# Delete an existing product
+@app.delete(
+    "/products/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db),
+):
+    product = db.get(Product, product_id)
+
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    db.delete(product)
+    db.commit()
+
