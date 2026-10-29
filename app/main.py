@@ -267,3 +267,31 @@ def create_order(
     return new_order
 
 
+# Retrieve all customer orders
+@app.get("/orders", response_model=list[OrderResponse])
+def get_orders(db: Session = Depends(get_db)):
+    orders = db.scalars(
+        select(Order).order_by(Order.id)
+    ).all()
+
+    return orders
+
+
+# Retrieve a single customer order by ID
+@app.get("/orders/{order_id}", response_model=OrderResponse)
+def get_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+):
+    order = db.get(Order, order_id)
+
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    return order
+
+
+
