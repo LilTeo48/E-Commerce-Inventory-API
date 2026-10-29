@@ -294,4 +294,71 @@ def get_order(
     return order
 
 
+# Cancel an existing customer order
+@app.patch("/orders/{order_id}/cancel", response_model=OrderResponse)
+def cancel_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+):
+    # Find the order and lock it during cancellation
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id)
+        .with_for_update()
+    )
+
+    # Check whether the order exists
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    # Prevent cancelling the same order twice
+    if order.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending orders can be cancelled",
+        )
+
+
+    # Retrieve and lock all products in the cancelled order
+    product_ids = sorted({
+        item.product_id for item in order.items
+    })
+
+    products = db.scalars(
+        select(Product)
+        .where(Product.id.in_(product_ids))
+        .order_by(Product.id)
+        .with_for_update()
+    ).all()
+
+    products_by_id = {
+        product.id: product for product in products
+    }
+
+    # Restore inventory for every purchased item
+    for item in order.items:
+        product = products_by_id.get(item.product_id)
+
+        if product is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Product {item.product_id} no longer exists",
+            )
+
+        product.stock_quantity += item.quantity
+
+
+    # Update the order status
+    order.status = "cancelled"
+
+    # Save the changes in one transaction
+    db.commit()
+    db.refresh(order)
+
+    return order
+
+
 

@@ -244,3 +244,184 @@ def test_get_order_by_id(client):
     assert len(order["items"]) == 1
     assert order["items"][0]["product_id"] == product_id
     assert order["items"][0]["quantity"] == 1
+
+
+def test_cancel_order_restores_inventory(client):
+    # Create a product with 10 units in stock
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Keyboard",
+            "description": "Mechanical keyboard",
+            "price": "79.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Purchase 3 keyboards
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 3,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Verify inventory decreased from 10 to 7
+    stock_response = client.get(f"/products/{product_id}")
+    assert stock_response.json()["stock_quantity"] == 7
+
+    # Cancel the order
+    cancel_response = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    # Verify the order was cancelled
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    # Verify inventory was restored from 7 to 10
+    restored_response = client.get(f"/products/{product_id}")
+    assert restored_response.json()["stock_quantity"] == 10
+
+def test_cancel_order_twice_returns_400(client):
+    # Create a product with 10 units
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Wireless Mouse",
+            "description": "Ergonomic wireless mouse",
+            "price": "29.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Purchase 4 units
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 4,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Cancel successfully the first time
+    first_cancel = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    assert first_cancel.status_code == 200
+
+    # Attempt to cancel the same order again
+    second_cancel = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    assert second_cancel.status_code == 400
+    assert second_cancel.json()["detail"] == (
+        "Only pending orders can be cancelled"
+    )
+
+    # Inventory should remain at 10, not increase to 14
+    product_check = client.get(f"/products/{product_id}")
+
+    assert product_check.status_code == 200
+    assert product_check.json()["stock_quantity"] == 10
+
+def test_cancel_nonexistent_order_returns_404(client):
+    # Attempt to cancel an order that does not exist
+    response = client.patch(
+        "/orders/999999/cancel"
+    )
+
+    # Verify the API returns 404 Not Found
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Order not found"
+
+
+def test_cancel_order_restores_multiple_products(client):
+    # Create two products
+    keyboard_response = client.post(
+        "/products",
+        json={
+            "name": "Mechanical Keyboard",
+            "description": "RGB mechanical keyboard",
+            "price": "89.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    mouse_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Mouse",
+            "description": "Wireless gaming mouse",
+            "price": "39.99",
+            "stock_quantity": 20,
+        },
+    )
+
+    assert keyboard_response.status_code == 201
+    assert mouse_response.status_code == 201
+
+    keyboard_id = keyboard_response.json()["id"]
+    mouse_id = mouse_response.json()["id"]
+
+    # Purchase 3 keyboards and 5 mice
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {"product_id": keyboard_id, "quantity": 3},
+                {"product_id": mouse_id, "quantity": 5},
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Confirm inventory was deducted
+    keyboard_stock = client.get(f"/products/{keyboard_id}")
+    mouse_stock = client.get(f"/products/{mouse_id}")
+
+    assert keyboard_stock.json()["stock_quantity"] == 7
+    assert mouse_stock.json()["stock_quantity"] == 15
+
+    # Cancel the order
+    cancel_response = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    # Verify both products have their original inventory
+    restored_keyboard = client.get(f"/products/{keyboard_id}")
+    restored_mouse = client.get(f"/products/{mouse_id}")
+
+    assert restored_keyboard.status_code == 200
+    assert restored_mouse.status_code == 200
+
+    assert restored_keyboard.json()["stock_quantity"] == 10
+    assert restored_mouse.json()["stock_quantity"] == 20
