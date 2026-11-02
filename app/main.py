@@ -360,5 +360,39 @@ def cancel_order(
 
     return order
 
+# Fulfill an existing customer order
+@app.patch("/orders/{order_id}/fulfill", response_model=OrderResponse)
+def fulfill_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+):
+    # Find and lock the order during fulfillment
+    order = db.scalar(
+        select(Order)
+        .where(Order.id == order_id)
+        .with_for_update()
+    )
 
+    # Return 404 if the order does not exist
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
+    # Only pending orders can be fulfilled
+    if order.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only pending orders can be fulfilled",
+        )
+
+    # Mark the order as fulfilled
+    order.status = "fulfilled"
+
+    # Save the status change
+    db.commit()
+    db.refresh(order)
+
+    return order
 

@@ -425,3 +425,255 @@ def test_cancel_order_restores_multiple_products(client):
 
     assert restored_keyboard.json()["stock_quantity"] == 10
     assert restored_mouse.json()["stock_quantity"] == 20
+
+def test_fulfill_order_success(client):
+    # Create a product with 10 units in stock
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Headset",
+            "description": "Wireless gaming headset",
+            "price": "59.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create an order for 3 headsets
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 3,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Inventory should decrease from 10 to 7
+    stock_response = client.get(f"/products/{product_id}")
+    assert stock_response.json()["stock_quantity"] == 7
+
+    # Fulfill the order
+    fulfill_response = client.patch(
+        f"/orders/{order_id}/fulfill"
+    )
+
+    assert fulfill_response.status_code == 200
+    assert fulfill_response.json()["status"] == "fulfilled"
+
+    # Verify the saved order status
+    saved_order = client.get(f"/orders/{order_id}")
+
+    assert saved_order.status_code == 200
+    assert saved_order.json()["status"] == "fulfilled"
+
+    # Fulfillment must not deduct inventory again
+    final_stock = client.get(f"/products/{product_id}")
+
+    assert final_stock.status_code == 200
+    assert final_stock.json()["stock_quantity"] == 7
+
+
+def test_fulfill_order_twice_returns_400(client):
+    # Create a product with 10 units available
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Monitor",
+            "description": "27-inch gaming monitor",
+            "price": "249.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create an order for 2 monitors
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 2,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Fulfill the order successfully
+    first_fulfill = client.patch(
+        f"/orders/{order_id}/fulfill"
+    )
+
+    assert first_fulfill.status_code == 200
+    assert first_fulfill.json()["status"] == "fulfilled"
+
+    # Attempt to fulfill the same order again
+    second_fulfill = client.patch(
+        f"/orders/{order_id}/fulfill"
+    )
+
+    assert second_fulfill.status_code == 400
+    assert second_fulfill.json()["detail"] == (
+        "Only pending orders can be fulfilled"
+    )
+
+    # Verify the order remains fulfilled
+    saved_order = client.get(f"/orders/{order_id}")
+
+    assert saved_order.status_code == 200
+    assert saved_order.json()["status"] == "fulfilled"
+
+    # Inventory must remain at 8
+    product_check = client.get(f"/products/{product_id}")
+
+    assert product_check.status_code == 200
+    assert product_check.json()["stock_quantity"] == 8
+
+
+def test_fulfill_cancelled_order_returns_400(client):
+    # Create a product with 10 units
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Mechanical Keyboard",
+            "description": "RGB gaming keyboard",
+            "price": "89.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create an order for 3 keyboards
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 3,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Cancel the order
+    cancel_response = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == "cancelled"
+
+    # Attempt to fulfill the cancelled order
+    fulfill_response = client.patch(
+        f"/orders/{order_id}/fulfill"
+    )
+
+    assert fulfill_response.status_code == 400
+    assert fulfill_response.json()["detail"] == (
+        "Only pending orders can be fulfilled"
+    )
+
+    # Verify the order remains cancelled
+    saved_order = client.get(f"/orders/{order_id}")
+
+    assert saved_order.status_code == 200
+    assert saved_order.json()["status"] == "cancelled"
+
+    # Inventory must remain restored to 10
+    product_check = client.get(f"/products/{product_id}")
+
+    assert product_check.status_code == 200
+    assert product_check.json()["stock_quantity"] == 10
+
+
+def test_cancel_fulfilled_order_returns_400(client):
+    # Create a product with 10 units in stock
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Mouse",
+            "description": "Wireless gaming mouse",
+            "price": "49.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create an order for 2 gaming mice
+    order_response = client.post(
+        "/orders",
+        json={
+            "items": [
+                {
+                    "product_id": product_id,
+                    "quantity": 2,
+                }
+            ]
+        },
+    )
+
+    assert order_response.status_code == 201
+    order_id = order_response.json()["id"]
+
+    # Fulfill the order
+    fulfill_response = client.patch(
+        f"/orders/{order_id}/fulfill"
+    )
+
+    assert fulfill_response.status_code == 200
+    assert fulfill_response.json()["status"] == "fulfilled"
+
+    # Attempt to cancel the fulfilled order
+    cancel_response = client.patch(
+        f"/orders/{order_id}/cancel"
+    )
+
+    assert cancel_response.status_code == 400
+    assert cancel_response.json()["detail"] == (
+        "Only pending orders can be cancelled"
+    )
+
+    # Verify the order remains fulfilled
+    saved_order = client.get(f"/orders/{order_id}")
+
+    assert saved_order.status_code == 200
+    assert saved_order.json()["status"] == "fulfilled"
+
+    # Inventory must remain at 8
+    product_check = client.get(f"/products/{product_id}")
+
+    assert product_check.status_code == 200
+    assert product_check.json()["stock_quantity"] == 8
+
+
+def test_fulfill_nonexistent_order_returns_404(client):
+    # Attempt to fulfill an order that does not exist
+    response = client.patch(
+        "/orders/999999/fulfill"
+    )
+
+    # Verify the API returns 404 Not Found
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Order not found"
