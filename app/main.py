@@ -63,13 +63,55 @@ def create_product(
 
     return new_product
 
-
-# Retrieve all products
+# Retrieve products with optional search, price, and stock filters
 @app.get("/products", response_model=list[ProductResponse])
-def get_products(db: Session = Depends(get_db)):
-    products = db.scalars(select(Product)).all()
-    return products
+def get_products(
+    search: str | None = None,
+    min_price: Decimal | None = Query(default=None, ge=0),
+    max_price: Decimal | None = Query(default=None, ge=0),
+    in_stock: bool | None = None,
+    db: Session = Depends(get_db),
+):
+    # Reject a minimum price greater than the maximum price
+    if (
+        min_price is not None
+        and max_price is not None
+        and min_price > max_price
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="min_price cannot be greater than max_price",
+        )
 
+    # Start with all products
+    query = select(Product)
+
+    # Search product names without case sensitivity
+    if search is not None:
+        query = query.where(
+            Product.name.ilike(f"%{search}%")
+        )
+
+    # Filter products at or above the minimum price
+    if min_price is not None:
+        query = query.where(Product.price >= min_price)
+
+    # Filter products at or below the maximum price
+    if max_price is not None:
+        query = query.where(Product.price <= max_price)
+
+    # Filter products by inventory availability
+    if in_stock is True:
+        query = query.where(Product.stock_quantity > 0)
+    elif in_stock is False:
+        query = query.where(Product.stock_quantity == 0)
+
+    # Return products in a predictable order
+    query = query.order_by(Product.id.asc())
+
+    products = db.scalars(query).all()
+
+    return products
 
 # Retrieve a single product by ID
 @app.get("/products/{product_id}", response_model=ProductResponse)

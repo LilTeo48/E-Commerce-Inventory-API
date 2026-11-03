@@ -318,3 +318,188 @@ def test_remove_inventory_insufficient_stock(client):
     get_response = client.get(f"/products/{product_id}")
     assert get_response.status_code == 200
     assert get_response.json()["stock_quantity"] == 10
+
+def test_search_products_by_name(client):
+    # Create products with different names
+    product_names = [
+        "Mechanical Keyboard",
+        "Wireless Mouse",
+        "Gaming Keyboard",
+    ]
+
+    for name in product_names:
+        response = client.post(
+            "/products",
+            json={
+                "name": name,
+                "description": "Gaming accessory",
+                "price": "49.99",
+                "stock_quantity": 10,
+            },
+        )
+
+        assert response.status_code == 201
+
+    # Search using lowercase to verify case-insensitive matching
+    response = client.get("/products?search=keyboard")
+
+    assert response.status_code == 200
+
+    products = response.json()
+    returned_names = [product["name"] for product in products]
+
+    # Both keyboards should match, but the mouse should not
+    assert returned_names == [
+        "Mechanical Keyboard",
+        "Gaming Keyboard",
+    ]
+
+def test_filter_products_by_price_range(client):
+    # Create products at three different price points
+    products = [
+        ("Budget Mouse", "19.99"),
+        ("Gaming Keyboard", "79.99"),
+        ("Gaming Monitor", "249.99"),
+    ]
+
+    for name, price in products:
+        response = client.post(
+            "/products",
+            json={
+                "name": name,
+                "description": "Gaming accessory",
+                "price": price,
+                "stock_quantity": 10,
+            },
+        )
+
+        assert response.status_code == 201
+
+    # Request products priced between $50 and $100
+    response = client.get(
+        "/products?min_price=50&max_price=100"
+    )
+
+    assert response.status_code == 200
+
+    returned_names = [
+        product["name"] for product in response.json()
+    ]
+
+    # Only the keyboard falls within this price range
+    assert returned_names == ["Gaming Keyboard"]
+
+def test_filter_products_by_stock_availability(client):
+    # Create products with different stock quantities
+    products = [
+        ("Gaming Keyboard", 10),
+        ("Wireless Mouse", 0),
+        ("Gaming Headset", 5),
+    ]
+
+    for name, stock in products:
+        response = client.post(
+            "/products",
+            json={
+                "name": name,
+                "description": "Gaming accessory",
+                "price": "49.99",
+                "stock_quantity": stock,
+            },
+        )
+
+        assert response.status_code == 201
+
+    # Retrieve only products currently in stock
+    response = client.get("/products?in_stock=true")
+
+    assert response.status_code == 200
+
+    returned_names = [
+        product["name"] for product in response.json()
+    ]
+
+    assert returned_names == [
+        "Gaming Keyboard",
+        "Gaming Headset",
+    ]
+
+    # Retrieve only out-of-stock products
+    response = client.get("/products?in_stock=false")
+
+    assert response.status_code == 200
+
+    returned_names = [
+        product["name"] for product in response.json()
+    ]
+
+    assert returned_names == ["Wireless Mouse"]
+
+def test_products_combined_filters(client):
+    # Create products with different names, prices, and stock
+    products = [
+        ("Gaming Keyboard", "79.99", 10),
+        ("Budget Keyboard", "29.99", 5),
+        ("Premium Keyboard", "149.99", 0),
+        ("Gaming Mouse", "59.99", 10),
+    ]
+
+    for name, price, stock in products:
+        response = client.post(
+            "/products",
+            json={
+                "name": name,
+                "description": "Gaming accessory",
+                "price": price,
+                "stock_quantity": stock,
+            },
+        )
+
+        assert response.status_code == 201
+
+    # Search for available keyboards priced $50-$200
+    response = client.get(
+        "/products?search=keyboard"
+        "&min_price=50"
+        "&max_price=200"
+        "&in_stock=true"
+    )
+
+    assert response.status_code == 200
+
+    returned_names = [
+        product["name"] for product in response.json()
+    ]
+
+    # Only the gaming keyboard meets every condition
+    assert returned_names == ["Gaming Keyboard"]
+
+def test_products_invalid_price_filters_return_422(client):
+    # Negative minimum price should be rejected
+    response = client.get("/products?min_price=-10")
+
+    assert response.status_code == 422
+
+    # Negative maximum price should be rejected
+    response = client.get("/products?max_price=-50")
+
+    assert response.status_code == 422
+
+    # Non-numeric price should be rejected
+    response = client.get("/products?min_price=abc")
+
+    assert response.status_code == 422
+
+def test_products_reversed_price_range_returns_422(client):
+    # Request a price range where the minimum exceeds the maximum
+    response = client.get(
+        "/products?min_price=200&max_price=50"
+    )
+
+    # The API should reject the invalid range
+    assert response.status_code == 422
+
+    # Verify the error message explains the problem
+    assert response.json()["detail"] == (
+        "min_price cannot be greater than max_price"
+    )
