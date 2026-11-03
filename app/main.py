@@ -2,10 +2,14 @@
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from typing import Literal
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Product
+from app.user_models import User
+from app.auth_schemas import UserCreate, UserResponse, UserLogin, TokenResponse
+from app.security import hash_password, verify_password, create_access_token
 from app.schemas import (
     InventoryAdjustment,
     ProductCreate,
@@ -460,3 +464,35 @@ def fulfill_order(
 
     return order
 
+# Register a new user account
+@app.post(
+    "/auth/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+):
+    # Hash the password before storing it
+    new_user = User(
+        email=user.email,
+        hashed_password=hash_password(user.password),
+    )
+
+    # Save the new user to PostgreSQL
+    db.add(new_user)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        )
+
+    # Retrieve the newly created user
+    db.refresh(new_user)
+
+    return new_user

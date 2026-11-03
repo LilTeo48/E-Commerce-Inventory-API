@@ -7,6 +7,8 @@ from sqlalchemy.orm import sessionmaker
 from app.database import get_db
 from app.main import app
 
+from app.database import Base
+from app.user_models import User
 
 TEST_DATABASE_URL = (
     "postgresql+psycopg://localhost:5432/"
@@ -17,6 +19,9 @@ test_engine = create_engine(
     TEST_DATABASE_URL,
     pool_pre_ping=True,
 )
+
+# Ensure the test database contains all registered model tables
+Base.metadata.create_all(bind=test_engine)
 
 TestingSessionLocal = sessionmaker(
     bind=test_engine,
@@ -32,7 +37,10 @@ def client():
     transaction = connection.begin()
 
     # Each test gets a database session using this connection
-    db = TestingSessionLocal(bind=connection)
+    db = TestingSessionLocal(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+    )
 
     def override_get_db():
         yield db
