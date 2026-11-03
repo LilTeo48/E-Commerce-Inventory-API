@@ -677,3 +677,183 @@ def test_fulfill_nonexistent_order_returns_404(client):
     # Verify the API returns 404 Not Found
     assert response.status_code == 404
     assert response.json()["detail"] == "Order not found"
+
+
+def test_get_orders_filter_by_status(client):
+    # Create a product for our test orders
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Gaming Controller",
+            "description": "Wireless controller",
+            "price": "49.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create two pending orders
+    order_ids = []
+
+    for _ in range(2):
+        response = client.post(
+            "/orders",
+            json={
+                "items": [
+                    {
+                        "product_id": product_id,
+                        "quantity": 1,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 201
+        order_ids.append(response.json()["id"])
+
+    # Fulfill the second order
+    fulfill_response = client.patch(
+        f"/orders/{order_ids[1]}/fulfill"
+    )
+
+    assert fulfill_response.status_code == 200
+
+    # Request only pending orders
+    response = client.get("/orders?status=pending")
+
+    assert response.status_code == 200
+
+    orders = response.json()
+
+    # Only the first order should be returned
+    assert len(orders) == 1
+    assert orders[0]["id"] == order_ids[0]
+    assert orders[0]["status"] == "pending"
+
+
+def test_get_orders_sort_descending(client):
+    # Create a product with enough inventory
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "USB-C Cable",
+            "description": "Fast charging cable",
+            "price": "14.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create three orders
+    order_ids = []
+
+    for _ in range(3):
+        response = client.post(
+            "/orders",
+            json={
+                "items": [
+                    {
+                        "product_id": product_id,
+                        "quantity": 1,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 201
+        order_ids.append(response.json()["id"])
+
+    # Retrieve orders in descending ID order
+    response = client.get("/orders?sort=desc")
+
+    assert response.status_code == 200
+
+    returned_ids = [
+        order["id"] for order in response.json()
+    ]
+
+    # Newest order IDs should appear first
+    assert returned_ids == list(reversed(order_ids))
+
+
+def test_get_orders_pagination(client):
+    # Create a product with enough inventory
+    product_response = client.post(
+        "/products",
+        json={
+            "name": "Laptop Stand",
+            "description": "Adjustable aluminum stand",
+            "price": "29.99",
+            "stock_quantity": 10,
+        },
+    )
+
+    assert product_response.status_code == 201
+    product_id = product_response.json()["id"]
+
+    # Create five orders
+    order_ids = []
+
+    for _ in range(5):
+        response = client.post(
+            "/orders",
+            json={
+                "items": [
+                    {
+                        "product_id": product_id,
+                        "quantity": 1,
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 201
+        order_ids.append(response.json()["id"])
+
+    # Retrieve the second page: skip two, return two
+    response = client.get("/orders?limit=2&offset=2")
+
+    assert response.status_code == 200
+
+    returned_ids = [
+        order["id"] for order in response.json()
+    ]
+
+    # The second page should contain orders 3 and 4
+    assert returned_ids == order_ids[2:4]
+
+
+def test_get_orders_invalid_sort_returns_422(client):
+    # Sorting must be either asc or desc
+    response = client.get("/orders?sort=banana")
+
+    assert response.status_code == 422
+
+
+def test_get_orders_invalid_status_returns_422(client):
+    # Status must be pending, fulfilled, or cancelled
+    response = client.get("/orders?status=unknown")
+
+    assert response.status_code == 422
+
+
+def test_get_orders_invalid_pagination_returns_422(client):
+    # Limit cannot be zero
+    response = client.get("/orders?limit=0")
+    assert response.status_code == 422
+
+    # Limit cannot exceed 100
+    response = client.get("/orders?limit=101")
+    assert response.status_code == 422
+
+    # Offset cannot be negative
+    response = client.get("/orders?offset=-1")
+    assert response.status_code == 422
+
+    # Limit must be an integer
+    response = client.get("/orders?limit=abc")
+    assert response.status_code == 422

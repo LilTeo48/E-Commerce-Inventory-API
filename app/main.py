@@ -1,5 +1,6 @@
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
+from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -267,12 +268,33 @@ def create_order(
     return new_order
 
 
-# Retrieve all customer orders
+# Retrieve customer orders with filtering, sorting, and pagination
 @app.get("/orders", response_model=list[OrderResponse])
-def get_orders(db: Session = Depends(get_db)):
-    orders = db.scalars(
-        select(Order).order_by(Order.id)
-    ).all()
+def get_orders(
+    status: Literal["pending", "fulfilled", "cancelled"] | None = None,
+    sort: Literal["asc", "desc"] = "asc",
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    # Start with all orders
+    query = select(Order)
+
+    # Filter orders by status when provided
+    if status is not None:
+        query = query.where(Order.status == status)
+
+    # Sort orders by ID
+    if sort == "desc":
+        query = query.order_by(Order.id.desc())
+    else:
+        query = query.order_by(Order.id.asc())
+
+    # Apply pagination at the database level
+    query = query.limit(limit).offset(offset)
+
+    # Execute the query
+    orders = db.scalars(query).all()
 
     return orders
 
